@@ -1,27 +1,16 @@
-"""lsy_drone_racing.utils.trajectory_visualizer
-
+"""
 TrajectoryVisualizer
 --------------------
-Offline (and optional live) visualization for drone racing runs.
+Visualization for drone racing runs.
 
 Key features
 - Records position, velocity and instantaneous speed during flight
-- Produces a MPCC-style figure (XY and XZ) with trajectory colored by speed
+- Produces a figure (XY and XZ) with trajectory colored by speed
 - Saves multiple episodes/runs without overwriting:
   - A time-stamped run folder is created at controller construction time
   - Each episode is saved as *_epXXX.png / *_epXXX_speed.png / *_epXXX.npz
 - Updates gate/obstacle positions from nominal -> true when the object is within sensor range
   (objects are "locked" once confirmed true)
-
-Customization via level2.toml (optional)
-[controller.visualizer]
-enabled = true
-live = false
-live_update_every = 10
-out_dir = "trajectory_viz"
-file_prefix = "mpcc"
-obstacle_radius = 0.20
-obstacle_height = 1.55
 """
 
 from __future__ import annotations
@@ -445,19 +434,20 @@ class TrajectoryVisualizer:
         from matplotlib.collections import LineCollection
 
         fig = plt.figure(figsize=(6.0, 7.0))
-        gs = fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.12)
+        gs = fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.22)
         ax_xy = fig.add_subplot(gs[0, 0])
-        ax_xz = fig.add_subplot(gs[1, 0])
+        ax_xz = fig.add_subplot(gs[1, 0], sharex=ax_xy)
 
         ax_xy.set_title(self._title)
         ax_xy.set_xlabel("x [m]")
         ax_xy.set_ylabel("y [m]")
         ax_xy.grid(True, alpha=0.5)
-        ax_xy.set_aspect("equal", adjustable="box")
+        ax_xy.set_aspect("equal", adjustable="datalim")
+        ax_xy.tick_params(axis="x", labelbottom=True)
         ax_xz.set_xlabel("x [m]")
         ax_xz.set_ylabel("z [m]")
         ax_xz.grid(True, alpha=0.5)
-        ax_xz.set_aspect("equal", adjustable="box")
+        ax_xz.set_aspect("equal", adjustable="datalim")
 
         if pos.shape[0] >= 2:
             def colored_line(ax, x, y, c):
@@ -556,18 +546,29 @@ class TrajectoryVisualizer:
             except Exception:
                 R = None
 
-            u = R[[0, 2], 0] if R is not None else np.array([1.0, 0.0])
-            v = R[[0, 2], 2] if R is not None else np.array([0.0, 1.0])
-            if not np.isfinite(u).all() or not np.isfinite(v).all():
-                u, v = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+            if R is not None and np.isfinite(R).all():
+                y_axis = R[:, 1]
+                z_axis = R[:, 2]
+            else:
+                y_axis = np.array([0.0, 1.0, 0.0])
+                z_axis = np.array([0.0, 0.0, 1.0])
 
-            u_norm = np.linalg.norm(u)
-            v_norm = np.linalg.norm(v)
-            if u_norm < 1e-6 or v_norm < 1e-6:
-                u, v = np.array([1.0, 0.0]), np.array([0.0, 1.0])
-                u_norm = v_norm = 1.0
-            u = u / u_norm
-            v = v / v_norm
+            if not np.isfinite(y_axis).all() or not np.isfinite(z_axis).all():
+                y_axis = np.array([0.0, 1.0, 0.0])
+                z_axis = np.array([0.0, 0.0, 1.0])
+
+            y_norm = np.linalg.norm(y_axis)
+            z_norm = np.linalg.norm(z_axis)
+            if y_norm < 1e-6 or z_norm < 1e-6:
+                y_axis = np.array([0.0, 1.0, 0.0])
+                z_axis = np.array([0.0, 0.0, 1.0])
+                y_norm = z_norm = 1.0
+
+            y_axis = y_axis / y_norm
+            z_axis = z_axis / z_norm
+
+            u = y_axis[[0, 2]]
+            v = z_axis[[0, 2]]
 
             outer = _square_corners(np.array([p[0], p[2]]), u, v, 0.5 * GATE_OUTER_WIDTH)
             inner = _square_corners(np.array([p[0], p[2]]), u, v, 0.5 * GATE_INNER_WIDTH)
@@ -656,9 +657,9 @@ class TrajectoryVisualizer:
         if not self._mpl_ready:
             plt.ion()
             self._fig = plt.figure(figsize=(6.0, 7.0))
-            gs = self._fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.12)
+            gs = self._fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.22)
             self._ax_xy = self._fig.add_subplot(gs[0, 0])
-            self._ax_xz = self._fig.add_subplot(gs[1, 0])
+            self._ax_xz = self._fig.add_subplot(gs[1, 0], sharex=self._ax_xy)
             self._mpl_ready = True
 
         pos = np.vstack(self._pos_hist) if self._pos_hist else np.zeros((0, 3), dtype=float)
@@ -671,11 +672,12 @@ class TrajectoryVisualizer:
         self._ax_xy.set_xlabel("x [m]")
         self._ax_xy.set_ylabel("y [m]")
         self._ax_xy.grid(True, alpha=0.5)
-        self._ax_xy.set_aspect("equal", adjustable="box")
+        self._ax_xy.set_aspect("equal", adjustable="datalim")
+        self._ax_xy.tick_params(axis="x", labelbottom=True)
         self._ax_xz.set_xlabel("x [m]")
         self._ax_xz.set_ylabel("z [m]")
         self._ax_xz.grid(True, alpha=0.5)
-        self._ax_xz.set_aspect("equal", adjustable="box")
+        self._ax_xz.set_aspect("equal", adjustable="datalim")
 
         if pos.shape[0] >= 2:
             pts_xy = np.stack([pos[:, 0], pos[:, 1]], axis=1)
